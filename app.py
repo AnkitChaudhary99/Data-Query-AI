@@ -264,7 +264,7 @@ def generate_sql_query(user_question, schema, chat_history):
 
     history_text = ""
 
-    for message in chat_history[-8:]:
+    for message in chat_history[-10:]:
 
         role = message["role"].upper()
         content = message["content"]
@@ -274,7 +274,7 @@ def generate_sql_query(user_question, schema, chat_history):
         if message.get("sql"):
 
             history_text += (
-                f"PREVIOUS SQL: {message['sql']}\n"
+                f"SQL GENERATED: {message['sql']}\n"
             )
 
     prompt = f"""
@@ -285,30 +285,42 @@ Your task is to generate SQL queries based on the user's question.
 DATABASE SCHEMA:
 {schema}
 
-PREVIOUS CONVERSATION:
+CONVERSATION HISTORY:
 {history_text if history_text else "No previous conversation."}
 
 CURRENT USER QUESTION:
 {user_question}
 
-CRITICAL RULES:
+CONVERSATION CONTEXT RULES:
 
-1. Use previous conversation history to understand follow-up questions.
-2. Resolve references such as "they", "them", "first artist",
-   "second one", and "what about the others" using conversation history.
-3. The tables were created using Pandas and are case-sensitive.
-4. ALWAYS surround ALL table names and column names with double quotes.
-5. Use table aliases when joining tables with identical column names.
-6. Generate only read-only SELECT queries.
-7. Never generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE,
+1. Carefully examine the previous conversation before generating SQL.
+2. Determine whether the current question is a follow-up or a new question.
+3. For follow-up questions, preserve the relevant filters, entities,
+   conditions, and context from previous queries.
+4. When the user asks to modify a previous query, modify that query
+   instead of generating an unrelated query.
+5. Resolve references such as "they", "them", "those", "their",
+   "the first one", "the second one", and "what about the others".
+6. If the user asks for additional information about previous results,
+   use the appropriate tables and joins to retrieve that information.
+7. If the user asks a completely unrelated question, generate SQL
+   based on that new question instead of unnecessarily reusing context.
+8. Never assume previous query results unless they are present
+   in the conversation history.
+
+SQL GENERATION RULES:
+
+1. The database uses PostgreSQL.
+2. ALWAYS surround ALL table names and column names with double quotes.
+3. Use table aliases when joining tables with identical column names.
+4. Generate only read-only SELECT queries.
+5. Never generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE,
    TRUNCATE, or other data-modifying statements.
-8. Return ONLY the SQL query without Markdown formatting or comments.
-9. Use PostgreSQL syntax.
-10. For date calculations, use appropriate PostgreSQL date casting.
-11. For mathematical operations, use appropriate numeric casting.
-12. Do not invent table names or column names.
-13. Never generate multiple SQL statements.
-14. Prefer queries that return a reasonable number of rows.
+6. Return ONLY the SQL query without Markdown formatting or comments.
+7. Use PostgreSQL syntax.
+8. Do not invent table names or column names.
+9. Never generate multiple SQL statements.
+10. Prefer queries that return a reasonable number of rows.
 
 {few_shots}
 
@@ -329,6 +341,7 @@ SQL:
         st.error(f"Error generating SQL query: {e}")
 
         return ""
+
 
 
 # ------------------- NATURAL LANGUAGE RESPONSE -------------------
@@ -407,6 +420,8 @@ def execute_sql_query(sql_query):
                 )
 
                 # Limit the number of returned rows.
+                sql_query = clean_sql(sql_query).rstrip(";").strip()
+
                 safe_query = f"""
                     SELECT *
                     FROM ({sql_query}) AS safe_result
