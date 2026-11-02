@@ -1,0 +1,7 @@
+streamlit
+pandas
+sqlalchemy
+psycopg2-binary
+langchain-google-genai
+python-dotenv
+tabulate

@@ -1,0 +1,106 @@
+[
+  {
+    "naturalQuestion": "How many customers are in the USA?",
+    "sqlQuery": "SELECT COUNT(*) AS TotalCustomers FROM Customers WHERE Country = 'USA';"
+  },
+  {
+    "naturalQuestion": "List all customers from Canada ordered by last name",
+    "sqlQuery": "SELECT FirstName, LastName, City FROM Customers WHERE Country = 'Canada' ORDER BY LastName ASC;"
+  },
+  {
+    "naturalQuestion": "Get total invoices and total sales amount per customer",
+    "sqlQuery": "SELECT c.CustomerId, c.FirstName, c.LastName, COUNT(i.InvoiceId) AS TotalInvoices, SUM(i.Total) AS TotalSpent FROM Customers c LEFT JOIN Invoices i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId, c.FirstName, c.LastName;"
+  },
+  {
+    "naturalQuestion": "Find the top 5 customers by total spending",
+    "sqlQuery": "SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) AS TotalSpent FROM Customers c JOIN Invoices i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId, c.FirstName, c.LastName ORDER BY TotalSpent DESC LIMIT 5;"
+  },
+  {
+    "naturalQuestion": "Count how many tracks exist in each genre",
+    "sqlQuery": "SELECT g.Name AS Genre, COUNT(t.TrackId) AS TrackCount FROM Genres g LEFT JOIN Tracks t ON g.GenreId = t.GenreId GROUP BY g.Name ORDER BY TrackCount DESC;"
+  },
+  {
+    "naturalQuestion": "Get album titles with their artist names",
+    "sqlQuery": "SELECT al.Title AS AlbumTitle, ar.Name AS ArtistName FROM Albums al JOIN Artists ar ON al.ArtistId = ar.ArtistId ORDER BY ar.Name;"
+  },
+  {
+    "naturalQuestion": "Find employees who report to the General Manager",
+    "sqlQuery": "SELECT e.EmployeeId, e.FirstName, e.LastName FROM Employees e WHERE e.ReportsTo = (SELECT EmployeeId FROM Employees WHERE Title = 'General Manager');"
+  },
+  {
+    "naturalQuestion": "Which country generated the highest revenue?",
+    "sqlQuery": "SELECT BillingCountry, SUM(Total) AS Revenue FROM Invoices GROUP BY BillingCountry ORDER BY Revenue DESC LIMIT 1;"
+  },
+  {
+    "naturalQuestion": "List customers who never made a purchase",
+    "sqlQuery": "SELECT c.CustomerId, c.FirstName, c.LastName FROM Customers c LEFT JOIN Invoices i ON c.CustomerId = i.CustomerId WHERE i.InvoiceId IS NULL;"
+  },
+  {
+    "naturalQuestion": "Get the most purchased track",
+    "sqlQuery": "SELECT t.Name, SUM(il.Quantity) AS TotalPurchased FROM InvoiceLines il JOIN Tracks t ON il.TrackId = t.TrackId GROUP BY t.Name ORDER BY TotalPurchased DESC LIMIT 1;"
+  },
+  {
+    "naturalQuestion": "Find total sales per employee (support reps)",
+    "sqlQuery": "SELECT e.EmployeeId, e.FirstName, e.LastName, SUM(i.Total) AS TotalSales FROM Employees e JOIN Customers c ON e.EmployeeId = c.SupportRepId JOIN Invoices i ON c.CustomerId = i.CustomerId GROUP BY e.EmployeeId, e.FirstName, e.LastName ORDER BY TotalSales DESC;"
+  },
+  {
+    "naturalQuestion": "Get monthly revenue for 2012",
+    "sqlQuery": "SELECT STRFTIME('%Y-%m', InvoiceDate) AS Month, SUM(Total) AS Revenue FROM Invoices WHERE STRFTIME('%Y', InvoiceDate) = '2012' GROUP BY Month ORDER BY Month;"
+  },
+  {
+    "naturalQuestion": "Find the longest track in each album",
+    "sqlQuery": "SELECT al.Title AS AlbumTitle, t.Name AS TrackName, MAX(t.Milliseconds) AS Duration FROM Tracks t JOIN Albums al ON t.AlbumId = al.AlbumId GROUP BY al.Title;"
+  },
+  {
+    "naturalQuestion": "Which customers spent more than the average customer spending?",
+    "sqlQuery": "SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) AS TotalSpent FROM Customers c JOIN Invoices i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId HAVING SUM(i.Total) > (SELECT AVG(CustomerTotal) FROM (SELECT SUM(Total) AS CustomerTotal FROM Invoices GROUP BY CustomerId));"
+  },
+  {
+    "naturalQuestion": "Rank customers by spending within each country",
+    "sqlQuery": "SELECT BillingCountry, CustomerId, TotalSpent, RANK() OVER (PARTITION BY BillingCountry ORDER BY TotalSpent DESC) AS CountryRank FROM (SELECT c.CustomerId, i.BillingCountry, SUM(i.Total) AS TotalSpent FROM Customers c JOIN Invoices i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId, i.BillingCountry);"
+  },
+
+  {
+    "naturalQuestion": "List all employees with the names of the managers they report to",
+    "sqlQuery": "SELECT e.EmployeeId, e.FirstName || ' ' || e.LastName AS EmployeeName, m.FirstName || ' ' || m.LastName AS ManagerName FROM Employees e LEFT JOIN Employees m ON e.ReportsTo = m.EmployeeId ORDER BY ManagerName;"
+  },
+  {
+    "naturalQuestion": "Find employees who do not report to anyone",
+    "sqlQuery": "SELECT EmployeeId, FirstName, LastName, Title FROM Employees WHERE ReportsTo IS NULL;"
+  },
+  {
+    "naturalQuestion": "Get the direct subordinates of the General Manager",
+    "sqlQuery": "SELECT e.EmployeeId, e.FirstName, e.LastName FROM Employees e WHERE e.ReportsTo = (SELECT EmployeeId FROM Employees WHERE Title = 'General Manager');"
+  },
+  {
+    "naturalQuestion": "List employees along with their manager and their manager’s manager",
+    "sqlQuery": "SELECT e.FirstName || ' ' || e.LastName AS EmployeeName, m.FirstName || ' ' || m.LastName AS ManagerName, mm.FirstName || ' ' || mm.LastName AS SeniorManagerName FROM Employees e LEFT JOIN Employees m ON e.ReportsTo = m.EmployeeId LEFT JOIN Employees mm ON m.ReportsTo = mm.EmployeeId;"
+  },
+  {
+    "naturalQuestion": "Find the hierarchy depth for each employee (levels from top manager)",
+    "sqlQuery": "WITH RECURSIVE EmployeeHierarchy AS ( SELECT EmployeeId, FirstName, LastName, ReportsTo, 0 AS Level FROM Employees WHERE ReportsTo IS NULL UNION ALL SELECT e.EmployeeId, e.FirstName, e.LastName, e.ReportsTo, eh.Level + 1 FROM Employees e JOIN EmployeeHierarchy eh ON e.ReportsTo = eh.EmployeeId ) SELECT EmployeeId, FirstName, LastName, Level FROM EmployeeHierarchy ORDER BY Level, EmployeeId;"
+  },
+  {
+    "naturalQuestion": "Count how many employees report under each manager",
+    "sqlQuery": "SELECT m.EmployeeId, m.FirstName || ' ' || m.LastName AS ManagerName, COUNT(e.EmployeeId) AS DirectReports FROM Employees m LEFT JOIN Employees e ON e.ReportsTo = m.EmployeeId GROUP BY m.EmployeeId ORDER BY DirectReports DESC;"
+  },
+  {
+    "naturalQuestion": "Find managers who have more than two direct reports",
+    "sqlQuery": "SELECT m.EmployeeId, m.FirstName, m.LastName, COUNT(e.EmployeeId) AS DirectReports FROM Employees m JOIN Employees e ON e.ReportsTo = m.EmployeeId GROUP BY m.EmployeeId HAVING COUNT(e.EmployeeId) > 2;"
+  },
+  {
+    "naturalQuestion": "List the full reporting chain for a specific employee (e.g., EmployeeId = 5)",
+    "sqlQuery": "WITH RECURSIVE ReportingChain AS ( SELECT EmployeeId, FirstName, LastName, ReportsTo FROM Employees WHERE EmployeeId = 5 UNION ALL SELECT e.EmployeeId, e.FirstName, e.LastName, e.ReportsTo FROM Employees e JOIN ReportingChain rc ON rc.ReportsTo = e.EmployeeId ) SELECT * FROM ReportingChain;"
+  },
+  {
+    "naturalQuestion": "Find all employees under the General Manager (all hierarchy levels)",
+    "sqlQuery": "WITH RECURSIVE OrgTree AS ( SELECT EmployeeId, FirstName, LastName, ReportsTo FROM Employees WHERE Title = 'General Manager' UNION ALL SELECT e.EmployeeId, e.FirstName, e.LastName, e.ReportsTo FROM Employees e JOIN OrgTree ot ON e.ReportsTo = ot.EmployeeId ) SELECT * FROM OrgTree WHERE EmployeeId != (SELECT EmployeeId FROM Employees WHERE Title = 'General Manager');"
+  },
+  {
+    "naturalQuestion": "Calculate total sales generated by each manager’s entire team",
+    "sqlQuery": "WITH RECURSIVE TeamHierarchy AS ( SELECT EmployeeId, ReportsTo FROM Employees UNION ALL SELECT e.EmployeeId, th.ReportsTo FROM Employees e JOIN TeamHierarchy th ON e.ReportsTo = th.EmployeeId ), TeamSales AS ( SELECT th.ReportsTo AS ManagerId, SUM(i.Total) AS TeamRevenue FROM TeamHierarchy th JOIN Customers c ON th.EmployeeId = c.SupportRepId JOIN Invoices i ON c.CustomerId = i.CustomerId GROUP BY th.ReportsTo ) SELECT e.EmployeeId, e.FirstName, e.LastName, ts.TeamRevenue FROM Employees e LEFT JOIN TeamSales ts ON e.EmployeeId = ts.ManagerId ORDER BY ts.TeamRevenue DESC;"
+  }
+
+
+
+]
