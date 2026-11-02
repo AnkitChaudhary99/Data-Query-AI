@@ -7,6 +7,9 @@ from pathlib import Path
 import re
 import os
 import json
+import sqlglot
+from sqlglot import exp
+
 
 # ------------------- CONFIGURATION -------------------
 
@@ -18,12 +21,14 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DB_URL = os.getenv("DB_URL")
 
 st.set_page_config(
-    page_title="SQL Chatbot",
-    page_icon=":bar_chart:",
+    page_title="Data Query AI",
+    page_icon="📊",
     layout="wide"
 )
 
-st.title("Chat with Postgres DB :bar_chart:")
+st.title("Data Query AI 📊")
+st.caption("Ask questions about your PostgreSQL database using natural language.")
+
 
 if not GOOGLE_API_KEY:
     st.error("GOOGLE_API_KEY is missing from your .env file.")
@@ -44,7 +49,10 @@ if "messages" not in st.session_state:
 
 @st.cache_resource
 def get_db_engine():
-    return create_engine(DB_URL, pool_pre_ping=True)
+    return create_engine(
+        DB_URL,
+        pool_pre_ping=True
+    )
 
 
 def get_schema():
@@ -61,6 +69,7 @@ def get_schema():
     schema_string = ""
 
     try:
+
         with engine.connect() as conn:
 
             result = conn.execute(inspector_query)
@@ -76,14 +85,16 @@ def get_schema():
                     if current_table is not None:
                         schema_string += "\n"
 
-                    schema_string += f"Table: {table_name}\n"
+                    schema_string += f'Table: "{table_name}"\n'
+
                     current_table = table_name
 
-                schema_string += f"  - {column_name}\n"
+                schema_string += f'  - "{column_name}"\n'
 
     except Exception as e:
 
         st.error(f"Error fetching database schema: {e}")
+
         return ""
 
     return schema_string
@@ -114,7 +125,11 @@ def clean_sql(sql_text: str):
         flags=re.IGNORECASE
     )
 
-    sql_text = re.sub(r"```", "", sql_text)
+    sql_text = re.sub(
+        r"```",
+        "",
+        sql_text
+    )
 
     return sql_text.strip()
 
@@ -122,35 +137,85 @@ def clean_sql(sql_text: str):
 def validate_sql(sql_query: str):
 
     if not sql_query:
-        return False
+        return False, "SQL query is empty."
 
-    query = sql_query.strip()
+    query = clean_sql(sql_query).strip()
 
-    query = re.sub(
-        r"/\*.*?\*/",
-        "",
-        query,
-        flags=re.DOTALL
-    )
+    try:
 
-    query = re.sub(r"--[^\n]*", "", query)
+        parsed_queries = sqlglot.parse(
+            query,
+            read="postgres"
+        )
 
-    query = query.strip()
+        parsed_queries = [
+            parsed
+            for parsed in parsed_queries
+            if parsed is not None
+        ]
 
-    if query.endswith(";"):
-        query = query[:-1].strip()
+        if len(parsed_queries) != 1:
 
-    if ";" in query:
-        return False
+            return False, "Only one SQL statement is allowed."
 
-    if not re.match(
-        r"^(SELECT|WITH)\b",
-        query,
-        re.IGNORECASE
-    ):
-        return False
+        parsed = parsed_queries[0]
 
-    return True
+        # Only SELECT queries are allowed.
+        # WITH queries are represented as SELECT expressions
+        # containing CTEs in SQLGlot.
+
+        if not isinstance(parsed, exp.Select):
+
+            return False, "Only SELECT queries are allowed."
+
+        # Reject SELECT INTO.
+        if parsed.args.get("into") is not None:
+
+            return False, "SELECT INTO is not allowed."
+
+        # Reject SELECT statements that lock rows.
+        if parsed.args.get("locks"):
+
+            return False, "SELECT FOR UPDATE/SHARE is not allowed."
+
+        # Reject data-modifying operations inside CTEs.
+        for node in parsed.walk():
+
+            if isinstance(
+                node,
+                (
+                    exp.Insert,
+                    exp.Update,
+                    exp.Delete,
+                    exp.Merge,
+                    exp.Create,
+                    exp.Drop,
+                    exp.Alter,
+                    exp.TruncateTable,
+                )
+            ):
+
+                return False, "Data-modifying SQL operations are not allowed."
+
+        # Reject SELECT statements with INTO or locking clauses
+        # anywhere inside the parsed query tree.
+        for node in parsed.walk():
+
+            if isinstance(node, exp.Select):
+
+                if node.args.get("into") is not None:
+
+                    return False, "SELECT INTO is not allowed."
+
+                if node.args.get("locks"):
+
+                    return False, "SELECT locking clauses are not allowed."
+
+        return True, "Valid read-only SELECT query."
+
+    except sqlglot.errors.ParseError:
+
+        return False, "SQL syntax is invalid."
 
 
 def get_few_shot_examples(file_path="fewshots.json"):
@@ -163,6 +228,7 @@ def get_few_shot_examples(file_path="fewshots.json"):
             return ""
 
         with open(full_path, "r", encoding="utf-8") as f:
+
             examples = json.load(f)
 
         formatted_examples = (
@@ -186,6 +252,7 @@ def get_few_shot_examples(file_path="fewshots.json"):
     except Exception as e:
 
         st.error(f"Error loading few-shot examples: {e}")
+
         return ""
 
 
@@ -205,7 +272,10 @@ def generate_sql_query(user_question, schema, chat_history):
         history_text += f"{role}: {content}\n"
 
         if message.get("sql"):
-            history_text += f"PREVIOUS SQL: {message['sql']}\n"
+
+            history_text += (
+                f"PREVIOUS SQL: {message['sql']}\n"
+            )
 
     prompt = f"""
 You are an expert PostgreSQL Data Analyst.
@@ -228,9 +298,8 @@ CRITICAL RULES:
    "second one", and "what about the others" using conversation history.
 3. The tables were created using Pandas and are case-sensitive.
 4. ALWAYS surround ALL table names and column names with double quotes.
-   Example: "Customer", "CustomerId".
 5. Use table aliases when joining tables with identical column names.
-6. Generate only read-only SELECT or WITH queries.
+6. Generate only read-only SELECT queries.
 7. Never generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE,
    TRUNCATE, or other data-modifying statements.
 8. Return ONLY the SQL query without Markdown formatting or comments.
@@ -238,6 +307,8 @@ CRITICAL RULES:
 10. For date calculations, use appropriate PostgreSQL date casting.
 11. For mathematical operations, use appropriate numeric casting.
 12. Do not invent table names or column names.
+13. Never generate multiple SQL statements.
+14. Prefer queries that return a reasonable number of rows.
 
 {few_shots}
 
@@ -256,6 +327,7 @@ SQL:
     except Exception as e:
 
         st.error(f"Error generating SQL query: {e}")
+
         return ""
 
 
@@ -306,13 +378,15 @@ INSTRUCTIONS:
 
 def execute_sql_query(sql_query):
 
-    if not validate_sql(sql_query):
+    is_valid, validation_message = validate_sql(sql_query)
+
+    if not is_valid:
 
         st.warning(
-            "Invalid query. Only a single SELECT or WITH statement is allowed."
+            f"Query rejected: {validation_message}"
         )
 
-        return pd.DataFrame()
+        return None
 
     try:
 
@@ -322,16 +396,25 @@ def execute_sql_query(sql_query):
 
             with conn.begin():
 
+                # PostgreSQL read-only transaction.
                 conn.exec_driver_sql(
                     "SET TRANSACTION READ ONLY"
                 )
 
+                # Prevent long-running queries.
                 conn.exec_driver_sql(
                     "SET LOCAL statement_timeout = '15s'"
                 )
 
+                # Limit the number of returned rows.
+                safe_query = f"""
+                    SELECT *
+                    FROM ({sql_query}) AS safe_result
+                    LIMIT 1000
+                """
+
                 result_df = pd.read_sql(
-                    text(sql_query),
+                    text(safe_query),
                     conn
                 )
 
@@ -341,7 +424,7 @@ def execute_sql_query(sql_query):
 
         st.error(f"Error executing SQL query: {e}")
 
-        return pd.DataFrame()
+        return None
 
 
 # ------------------- STREAMLIT CHAT APPLICATION -------------------
@@ -355,11 +438,12 @@ if __name__ == "__main__":
     if not schema:
 
         st.error("Unable to retrieve database schema.")
+
         st.stop()
 
     st.success("Database connected successfully!")
 
-    # Display previous conversation
+    # Display previous conversation.
 
     for message in st.session_state.messages:
 
@@ -383,7 +467,7 @@ if __name__ == "__main__":
                     use_container_width=True
                 )
 
-    # Chat input
+    # Chat input.
 
     user_question = st.chat_input(
         "Ask a question about your database..."
@@ -391,20 +475,14 @@ if __name__ == "__main__":
 
     if user_question:
 
-        # Display user message
-
         with st.chat_message("user"):
 
             st.markdown(user_question)
-
-        # Save user message
 
         st.session_state.messages.append({
             "role": "user",
             "content": user_question
         })
-
-        # Generate assistant response
 
         with st.chat_message("assistant"):
 
@@ -425,54 +503,68 @@ if __name__ == "__main__":
                     language="sql"
                 )
 
-                # Execute SQL query
+                is_valid, validation_message = validate_sql(sql_query)
 
-                with st.spinner("Executing SQL query..."):
+                if not is_valid:
 
-                    result_df = execute_sql_query(sql_query)
-
-                if not result_df.empty:
-
-                    st.markdown("**Query Results:**")
-
-                    st.dataframe(
-                        result_df,
-                        use_container_width=True
+                    st.error(
+                        f"SQL validation failed: {validation_message}"
                     )
 
-                    # Generate natural language response
-
-                    with st.spinner("Analyzing results..."):
-
-                        answer = get_natural_language_response(
-                            user_question,
-                            result_df
-                        )
-
-                    st.markdown("**Answer:**")
-
-                    st.markdown(answer)
-
-                    # Save assistant response and results
-
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "sql": sql_query,
-                        "data": result_df
-                    })
-
-                else:
-
-                    answer = "No results found for your question."
-
-                    st.info(answer)
+                    answer = (
+                        "The generated SQL query failed security validation."
+                    )
 
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": answer,
                         "sql": sql_query
                     })
+
+                else:
+
+                    with st.spinner("Executing SQL query..."):
+
+                        result_df = execute_sql_query(sql_query)
+
+                    if result_df is not None:
+
+                        st.markdown("**Query Results:**")
+
+                        st.dataframe(
+                            result_df,
+                            use_container_width=True
+                        )
+
+                        with st.spinner("Analyzing results..."):
+
+                            answer = get_natural_language_response(
+                                user_question,
+                                result_df
+                            )
+
+                        st.markdown("**Answer:**")
+
+                        st.markdown(answer)
+
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": answer,
+                            "sql": sql_query,
+                            "data": result_df
+                        })
+
+                    else:
+
+                        answer = "SQL execution failed."
+
+                        st.error(answer)
+
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": answer,
+                            "sql": sql_query
+                        })
 
             else:
 
